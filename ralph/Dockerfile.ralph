@@ -1,0 +1,32 @@
+FROM node:22-slim
+
+RUN apt-get update && apt-get install -y \
+    git \
+    jq \
+    curl \
+  && rm -rf /var/lib/apt/lists/* \
+  && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+  && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
+  && apt-get update && apt-get install -y gh \
+  && rm -rf /var/lib/apt/lists/*
+
+RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
+
+RUN npm install -g @anthropic-ai/claude-code
+
+RUN useradd -m -s /bin/bash ralph
+
+WORKDIR /workspace
+
+# Create node_modules owned by ralph so the Docker volume mount is writable
+RUN mkdir -p /workspace/node_modules && chown ralph:ralph /workspace/node_modules
+
+USER ralph
+
+# Git identity — these are placeholders. Override at build time with your own:
+#   docker build --build-arg GIT_USER_NAME="Your Name" --build-arg GIT_USER_EMAIL="you@example.com" ...
+ARG GIT_USER_NAME="Ralph"
+ARG GIT_USER_EMAIL="ralph@afk.dev"
+RUN git config --global user.name "$GIT_USER_NAME" && \
+    git config --global user.email "$GIT_USER_EMAIL" && \
+    git config --global safe.directory /workspace
