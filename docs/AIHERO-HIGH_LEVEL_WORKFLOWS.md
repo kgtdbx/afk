@@ -5,17 +5,17 @@ All discovered workflows from studying matt-latest, matt-cohort3, matt-previous,
 ## Table of Contents
 
 - [Quick Reference: Skill Evolution](#quick-reference-skill-evolution)
-- [Workflow 1: Feature Development (HITL → AFK)](#workflow-1-feature-development-hitl--afk)
-- [Workflow 2: Bug Triage & Diagnosis](#workflow-2-bug-triage--diagnosis-new)
-- [Workflow 3: Architecture Improvement](#workflow-3-architecture-improvement)
+- [WORKFLOW 1: Feature Development (HITL → AFK)](#workflow-1-feature-development-hitl--afk)
+- [WORKFLOW 2: Bug Triage & Diagnosis](#workflow-2-bug-triage--diagnosis-new)
+- [WORKFLOW 3: Architecture Improvement](#workflow-3-architecture-improvement)
+- [WORKFLOW 4: Domain Modeling](#workflow-4-domain-modeling-new)
   - [Architecture Decision Records (ADRs)](#architecture-decision-records-adrs)
-- [Workflow 4: Domain Modeling](#workflow-4-domain-modeling-new)
-- [Workflow 5: Prototyping](#workflow-5-prototyping-new)
-- [Workflow 6: TDD (Test-Driven Development)](#workflow-6-tdd-test-driven-development)
-- [Workflow 7: Token Compression](#workflow-7-token-compression-new)
-- [Workflow 8: Agent Handoff](#workflow-8-agent-handoff-new-in-progress)
-- [Workflow 9: Code Migration](#workflow-9-code-migration-for-existing-codebases)
-- [Workflow 10: Research → Implementation](#workflow-10-research--implementation-pipeline)
+- [WORKFLOW 5: Prototyping](#workflow-5-prototyping-new)
+- [WORKFLOW 6: TDD (Test-Driven Development)](#workflow-6-tdd-test-driven-development)
+- [WORKFLOW 7: Token Compression](#workflow-7-token-compression-new)
+- [WORKFLOW 8: Agent Handoff](#workflow-8-agent-handoff-new-in-progress)
+- [WORKFLOW 9: Code Migration](#workflow-9-code-migration-for-existing-codebases)
+- [WORKFLOW 10: Research → Implementation](#workflow-10-research--implementation-pipeline)
 - [Skill Comparison: Which Version to Use?](#skill-comparison-which-version-to-use)
 - [Cheat Sheet](#cheat-sheet)
 
@@ -166,6 +166,7 @@ Bug report arrives
 ---
 
 ## WORKFLOW 3: Architecture Improvement
+(Improve/refactor codebase structure: walks through the codebase and finds opportunities to deepen it)
 
 Same skill, but matt-latest adds domain awareness.
 
@@ -191,6 +192,58 @@ Same skill, but matt-latest adds domain awareness.
        └── Create GitHub issue RFC
            └── /to-issues to break RFC into slices
            └── AFK implements
+```
+
+### Critical: Use TDD when AFK refactors
+
+```
+⚠️  ATTENTION! SPECIFY THAT YOU WANT red/green/refactor WHEN AFK.
+    Ralph wrote all the code first, then added tests after —
+    the opposite of TDD. This led to 8 tests covering dead code
+    (completeLessonGamification) that we had to revert because
+    it broke the app. If Ralph had used TDD, the first test cycle
+    would have caught the bundling issue before committing.
+
+    Two ways to enforce TDD:
+
+    Option A: Add to ralph/prompt.md (applies to all AFK runs):
+    "Use red-green-refactor TDD for all backend changes.
+     Write ONE failing test, then minimal code to pass, repeat."
+
+    Option B: Pass directly when running a skill (one-off):
+    /improve-codebase-architecture Use red-green-refactor TDD
+     for all backend changes. Write ONE failing test, then
+     minimal code to pass, repeat.
+```
+
+### Debugging: Playwright MCP + git bisect by hand
+
+When the refactoring broke the app (client-side navigation died),
+Playwright MCP was critical to finding the exact bug:
+
+```
+1. Playwright MCP let the LLM see the actual browser state —
+   console errors, DOM snapshots, page URLs after navigation.
+   Screenshots alone weren't enough. The LLM needed to read
+   "TypeError: promisify is not a function" from the console
+   to understand better-sqlite3 was leaking into the client.
+
+2. We peeled back commits one by one to isolate the problem:
+   - Revert ALL Ralph's changes → app works
+   - Restore gamificationService.ts only → still works
+   - Restore layout.app.tsx → still works
+   - Restore dashboard.tsx → still works
+   - Restore lesson route → BREAKS
+   Found: the lesson route import was the culprit.
+
+3. After fixing the root cause (reverted lesson route, moved
+   cross-service functions to .server.ts), we invoked /tdd to
+   write integration tests on top of the now-working code:
+   /tdd Write integration tests for the mark-complete action
+   This ensured the fix was covered by tests before moving on.
+
+4. Setup: claude mcp add playwright npx @playwright/mcp@latest
+   Then restart Claude Code session to pick it up.
 ```
 
 ### What we learned from our refactoring:
