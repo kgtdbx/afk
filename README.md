@@ -1,4 +1,4 @@
-# AFK Runners — Ralph & Sandcastle
+# AFK Runners: Ralph & Sandcastle
 
 Two ways to run the Ralph AFK loop. Same interface, different runtimes. An LLM (or human) can follow these instructions to set up either runner from scratch.
 
