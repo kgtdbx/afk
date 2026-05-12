@@ -2,6 +2,22 @@
 
 Two ways to run the Ralph AFK loop. Same interface, different runtimes. An LLM (or human) can follow these instructions to set up either runner from scratch.
 
+## Table of Contents
+
+- [Prerequisites](#prerequisites-both-runners)
+- [Setup: Ralph](#setup-ralph-custom-docker)
+- [Setup: Sandcastle](#setup-sandcastle)
+- [Using Codex Instead of Claude Code](#using-codex-instead-of-claude-code)
+- [Where to Run From](#where-to-run-from)
+- [Usage](#usage-identical-for-both-runners)
+- [Directory Structure](#directory-structure)
+- [How Each Runner Works](#how-each-runner-works)
+- [File Conflict Note](#file-conflict-note)
+- [Differences](#differences)
+- [Prompt Contents](#prompt-contents)
+- [Without GitHub: Alternative Issue Backends](#without-github-alternative-issue-backends)
+- [Lessons Learned](#lessons-learned-why-we-customized-these-files)
+
 ## Prerequisites (both runners)
 
 - Docker Desktop installed and running
@@ -115,6 +131,96 @@ Watch logs in another terminal:
 tail -f .sandcastle/logs/<branch-name>.log
 ```
 
+## Using Codex Instead of Claude Code
+
+Both runners support `--agent codex` to use OpenAI Codex instead of Claude Code.
+
+### Prerequisites (Codex — both runners)
+
+- Codex CLI installed on your Mac: `npm i -g @openai/codex`
+- Authenticated on your Mac: `codex login` (credentials at `~/.codex/auth.json`)
+
+### Setup: Ralph with Codex
+
+Rebuild the Docker image (it now includes both Claude Code and Codex CLI):
+
+```bash
+docker build -t ralph-runner -f Dockerfile.ralph .
+```
+
+That's it. Ralph mounts `~/.codex/` into the container automatically.
+
+### Setup: Sandcastle with Codex
+
+Rebuild the Sandcastle Docker image (it now includes Codex CLI + Corepack fixes):
+
+```bash
+pnpm sandcastle docker build-image
+```
+
+No `.env` changes needed — Sandcastle's `main.ts` automatically mounts `~/.codex/` into the container when the directory exists on your Mac. Codex uses the credentials from `codex login`, not the `.env` file.
+
+### Run with Codex
+
+```bash
+# Ralph runner with Codex
+./afk/ralph/afk.sh 100 --agent codex
+
+# Sandcastle runner with Codex
+./afk/sandcastle/afk.sh 100 --agent codex
+
+# Mix with other flags
+./afk/ralph/afk.sh 100 --agent codex --issue 3
+./afk/sandcastle/afk.sh 100 --agent codex --file plans/prd.md
+```
+
+Default is `--agent claude` (backwards compatible). Running without `--agent` works exactly as before.
+
+### Skills Compatibility
+
+Both Claude Code and Codex use the same SKILL.md format. Symlink skills so both agents see them:
+
+```bash
+mkdir -p .agents
+ln -s ../.claude/skills .agents/skills
+```
+
+Codex requires YAML frontmatter in SKILL.md (Claude Code doesn't). Always include it:
+
+```markdown
+---
+name: skill-name
+description: What it does. Use when [triggers].
+---
+
+# Rest of instructions...
+```
+
+Invoke skills in Codex with `$skill-name` (vs `/skill-name` in Claude Code).
+
+### Logs
+
+Ralph logs to `ralph/logs/<branch>.log`. Watch in another terminal:
+
+```bash
+tail -f ralph/logs/<branch-name>.log
+```
+
+### Full Workflow (tested)
+
+```bash
+# 1. Create issues from a PRD (inside Codex interactive)
+$prd-to-issues #1
+
+# 2. AFK loop — implement all issues
+./afk/ralph/afk.sh 100 --agent codex
+
+# 3. AFK loop again — PRD review and QA
+./afk/ralph/afk.sh 100 --agent codex
+```
+
+---
+
 ## Where to Run From
 
 Always run from the project root:
@@ -126,20 +232,23 @@ cd /Users/krl/Documents/dev/cohort-003-project-main
 
 The scripts use `git remote` and `gh issue list` early on (before resolving paths), so they need to be inside the git repo. Running from the project root guarantees everything works — `git`, `gh`, relative file paths, and Sandcastle's `npx tsx` all resolve correctly.
 
-## Usage (identical for both)
+## Usage (identical for both runners)
 
 ```bash
-# Pick from all open GitHub issues (default)
-./ralph/afk.sh 5
+# Pick from all open GitHub issues (default, uses Claude Code)
+./ralph/afk.sh 100
+
+# Use Codex instead
+./ralph/afk.sh 100 --agent codex
 
 # Specific issues
-./ralph/afk.sh 3 --issue 1 --issue 2
+./ralph/afk.sh 100 --issue 1 --issue 2
 
 # Plan/PRD files
-./ralph/afk.sh 3 --file plans/plan.md --file plans/prd.md
+./ralph/afk.sh 100 --file plans/plan.md --file plans/prd.md
 
-# Mix issues and files (any combo, any order, repeatable)
-./ralph/afk.sh 5 --issue 1 --file plans/prd.md --issue 12 --file plans/prd2.md
+# Mix everything (any combo, any order, repeatable)
+./ralph/afk.sh 100 --agent codex --issue 1 --file plans/prd.md --issue 12
 ```
 
 ## Directory Structure
@@ -192,8 +301,10 @@ Running them back-to-back or even simultaneously is safe. Ralph ignores `ralph/p
 | --------------- | ---------------------------------------- | ------------------------------------------------------ |
 | Runtime         | Custom `docker run`                      | `@ai-hero/sandcastle` library                          |
 | Container image | `ralph-runner` (from `Dockerfile.ralph`) | `sandcastle:*` (from `.sandcastle/Dockerfile`)         |
-| Auth            | `~/.claude_auth.txt` + `gh auth token`   | `.sandcastle/.env`                                     |
-| Logs            | Streams to terminal via jq               | `tail -f .sandcastle/logs/<branch>.log`                |
+| Agents          | Claude Code + Codex (`--agent` flag)     | Claude Code + Codex (`--agent` flag)                   |
+| Auth (Claude)   | `~/.claude_auth.txt`                     | `.sandcastle/.env`                                     |
+| Auth (Codex)    | `~/.codex/auth.json` (mounted into container) | `.sandcastle/.env`                                |
+| Logs            | `ralph/logs/<branch>.log`                | `.sandcastle/logs/<branch>.log`                        |
 | Config          | All in `afk.sh`                          | Split across `main.ts`, `sandcastle-prompt.md`, `.env` |
 | Prompt loading  | Reads own copy directly                  | Copies to `ralph/prompt.md` for Sandcastle to find     |
 
@@ -250,3 +361,5 @@ No API, no CLI tools, no auth tokens. Works with any git host or no git host at 
 | Lied about closing issues | Said "issue already closed" when it wasn't                 | Explicit `gh issue close` command template with `--repo` in prompt    |
 | Context too large         | Passing 20 full issue bodies would exceed token limits     | `afk.sh` passes only titles+numbers; Ralph fetches the one it picks   |
 | node_modules crash        | macOS binaries in bind-mounted node_modules crash on Linux | Ralph uses a Docker named volume; Sandcastle runs `pnpm install` hook |
+
+For lessons learned from porting to Codex (auth, skills, Docker, Sandcastle fixes), see [docs/lessons-learned-codex-port.md](docs/lessons-learned-codex-port.md).

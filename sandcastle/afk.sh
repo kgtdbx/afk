@@ -6,8 +6,9 @@ if [ -z "$1" ]; then
   echo "  iterations:  max number of iterations to run"
   echo ""
   echo "Options (all repeatable, can be mixed):"
-  echo "  --issue N    work on a specific GitHub issue"
-  echo "  --file FILE  include a markdown file (plan, PRD, etc.)"
+  echo "  --agent NAME  agent to use: claude (default), codex"
+  echo "  --issue N     work on a specific GitHub issue"
+  echo "  --file FILE   include a markdown file (plan, PRD, etc.)"
   echo ""
   echo "Examples:"
   echo "  $0 5                                                    # all open issues"
@@ -21,10 +22,12 @@ MAX_ITER="$1"
 shift
 
 # Parse optional flags (all repeatable, any order)
+AGENT="claude"
 ISSUES=()
 FILES=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --agent) AGENT="$2"; shift 2 ;;
     --issue) ISSUES+=("$2"); shift 2 ;;
     --file) FILES+=("$2"); shift 2 ;;
     *) echo "Unknown option: $1"; exit 1 ;;
@@ -65,4 +68,4 @@ cd "$PROJECT_DIR"
 # Copy prompt.md so sandcastle-prompt.md can find it at ralph/prompt.md
 cp "$(dirname "$0")/prompt.md" ralph/prompt.md 2>/dev/null || true
 
-npx tsx ./.sandcastle/main.ts "$inputs" "$MAX_ITER" 2>&1 | grep -v "chown.*Permission denied"
+npx tsx ./.sandcastle/main.ts "$inputs" "$MAX_ITER" "$AGENT" 2>&1 | grep -v "chown.*Permission denied"

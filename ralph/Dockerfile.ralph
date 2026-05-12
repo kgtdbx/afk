@@ -4,6 +4,9 @@ RUN apt-get update && apt-get install -y \
     git \
     jq \
     curl \
+    python3 \
+    make \
+    g++ \
   && rm -rf /var/lib/apt/lists/* \
   && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
   && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list \
@@ -12,7 +15,9 @@ RUN apt-get update && apt-get install -y \
 
 RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
 
+# ---- Agent CLIs ----
 RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @openai/codex
 
 RUN useradd -m -s /bin/bash ralph
 

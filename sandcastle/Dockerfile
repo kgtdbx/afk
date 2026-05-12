@@ -15,12 +15,16 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
   && apt-get update && apt-get install -y gh \
   && rm -rf /var/lib/apt/lists/*
 
-RUN corepack enable
+ENV COREPACK_ENABLE_NETWORK=1 COREPACK_ENABLE_AUTO_PIN=0 COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && corepack prepare pnpm@9.12.3 --activate
 
 # Rename the base image's "node" user to "agent" and set UID/GID to match
 # the macOS host user (503:20) so bind-mounted files are owned correctly
 # and Sandcastle's git config / chown operations succeed.
 RUN usermod -d /home/agent -m -l agent -u 503 -g 20 node
+# Install Codex CLI (before USER switch — needs root for global install)
+RUN npm install -g @openai/codex
+
 USER agent
 
 # Install Claude Code CLI
