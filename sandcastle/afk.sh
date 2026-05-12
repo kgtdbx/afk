@@ -68,4 +68,9 @@ cd "$PROJECT_DIR"
 # Copy prompt.md so sandcastle-prompt.md can find it at ralph/prompt.md
 cp "$(dirname "$0")/prompt.md" ralph/prompt.md 2>/dev/null || true
 
+# Ensure host-native binaries before running tsx on macOS.
+# Sandcastle's Docker container may overwrite node_modules with Linux binaries
+# via bind mount, breaking tsx/esbuild on the host between iterations.
+pnpm install --frozen-lockfile 2>/dev/null
+
 npx tsx ./.sandcastle/main.ts "$inputs" "$MAX_ITER" "$AGENT" 2>&1 | grep -v "chown.*Permission denied"

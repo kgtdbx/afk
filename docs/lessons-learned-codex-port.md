@@ -1,6 +1,5 @@
 # Lessons Learned: Porting AFK from Claude Code to Codex
 
-Documented 2026-05-11 during live porting session.
 
 ---
 
@@ -337,3 +336,36 @@ the container.
 | Use container-local pnpm store | Sandcastle Docker |
 | Install global packages before USER | Sandcastle Docker |
 | Mount ~/.codex for OAuth auth | Sandcastle Docker |
+| Restore host binaries before tsx | Sandcastle host |
+
+---
+
+## 17. Sandcastle: Restore Host Binaries Before Running tsx
+
+`sandcastle/afk.sh` runs `npx tsx` on the **host Mac** before handing off to
+Docker. But Sandcastle's container bind-mounts the project and runs
+`pnpm install` inside it, overwriting `node_modules/` with **Linux** binaries.
+
+On the next iteration, `npx tsx` on the Mac finds Linux esbuild and crashes:
+
+```
+  ERROR:
+  "@esbuild/linux-x64" package is present but this platform
+  needs the "@esbuild/darwin-x64" package instead.
+
+  ROOT CAUSE:
+  1. sandcastle/afk.sh runs npx tsx on Mac           (needs darwin binaries)
+  2. Docker container runs pnpm install               (writes linux binaries)
+  3. Next iteration: npx tsx on Mac finds linux bins   (crash)
+
+  FIX: Run pnpm install --frozen-lockfile in afk.sh before npx tsx:
+```
+
+```bash
+# In sandcastle/afk.sh, before npx tsx:
+pnpm install --frozen-lockfile 2>/dev/null
+```
+
+Ralph doesn't have this problem because it uses a **named Docker volume**
+(`ralph_node_modules`) that keeps Linux binaries separate from the host's
+`node_modules/`. Sandcastle shares the host's `node_modules/` via bind mount.
