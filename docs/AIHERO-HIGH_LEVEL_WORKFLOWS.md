@@ -6,6 +6,7 @@ All discovered workflows from studying matt-latest, matt-cohort3, matt-previous,
 
 - [Quick Reference: Skill Evolution](#quick-reference-skill-evolution)
 - [WORKFLOW 1: Feature Development (HITL → AFK)](#workflow-1-feature-development-hitl--afk)
+- [WORKFLOW 1B: Claude Desktop AFK (in-session, no Docker)](#workflow-1b-claude-desktop-afk-in-session-no-docker)
 - [WORKFLOW 2: Bug Triage & Diagnosis](#workflow-2-bug-triage--diagnosis-new)
 - [WORKFLOW 3: Architecture Improvement](#workflow-3-architecture-improvement)
 - [WORKFLOW 4: Domain Modeling](#workflow-4-domain-modeling-new)
@@ -88,12 +89,19 @@ The main workflow. Human designs, agent builds.
 ┌─────────────────────────────────────────────────────────────┐
 │  AFK PHASE (Ralph runs autonomously)                         │
 │                                                              │
-│  ./afk/sandcastle/afk.sh 10                                  │
-│     └── Picks issues by priority                             │
-│     └── Implements one per iteration                         │
-│     └── Runs tests + typecheck                               │
-│     └── Commits + closes issue                               │
-│     └── Repeats until NO MORE TASKS                          │
+│  Pick a runtime — same prompt.md, same loop, different host: │
+│                                                              │
+│  ./afk/ralph/afk.sh 10        # Custom Docker container      │
+│  ./afk/sandcastle/afk.sh 10   # Sandcastle library + Docker  │
+│  /afk … in Claude Desktop     # In-session skill, no Docker  │
+│                                 (see WORKFLOW 1B)            │
+│                                                              │
+│  All three:                                                  │
+│     └── Pick issues by priority                              │
+│     └── Implement one per iteration                          │
+│     └── Run tests + typecheck                                │
+│     └── Commit + close issue                                 │
+│     └── Repeat until NO MORE TASKS                           │
 │                                                              │
 │  IMPORTANT: Add to prompt.md:                                │
 │  "Use red/green/refactor TDD for backend code"               │
@@ -121,6 +129,96 @@ The main workflow. Human designs, agent builds.
 ```
 
 Key difference: OLD had a plan file with phases you executed one by one. NEW creates GitHub issues with dependencies and lets Ralph work through them autonomously.
+
+---
+
+## WORKFLOW 1B: Claude Desktop AFK (in-session, no Docker)
+
+A third AFK runtime that runs **inside an existing Claude session** (Claude Desktop or `claude` CLI) instead of spinning up Docker per iteration. Same `prompt.md`, same `<promise>NO MORE TASKS</promise>` sentinel, very different ergonomics. Installation lives in [README → Setup: Claude Desktop AFK](../README.md#setup-claude-desktop-afk-in-session-skill-no-docker).
+
+### The flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  1. Open the project in Claude Desktop (or `claude` CLI)    │
+│                                                              │
+│  2. Enable auto-accept                                       │
+│     Desktop: toggle "Auto-accept edits" in the permission    │
+│              menu                                            │
+│     CLI:     claude --dangerously-skip-permissions           │
+│                                                              │
+│  3. Send one kickoff prompt, e.g.:                           │
+│                                                              │
+│     /afk work on the remaining issues of this project,       │
+│     https://github.com/<owner>/<repo>/issues                 │
+│     don't prompt me for anything, just work on it until      │
+│     all issues are done                                      │
+│                                                              │
+│  4. Each /afk invocation = ONE iteration:                    │
+│     └── build-prompt.sh assembles commits + issues + prompt  │
+│     └── Pick one issue, implement, test, typecheck, commit   │
+│     └── Close the issue via `gh`                             │
+│     └── Append to <repo>/afk/logs/<branch>.log               │
+│                                                              │
+│  5. Session keeps looping (because the kickoff prompt told   │
+│     it to) until no actionable work remains, then emits      │
+│     <promise>NO MORE TASKS</promise> and stops               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Caveats
+
+The in-session skill has different tradeoffs than the Docker-based runners. Worth knowing before you reach for it.
+
+#### Shared context across all iterations
+
+Every iteration happens **inside the same Claude session**, so the conversation context grows as the loop runs. This is the opposite of Ralph and Sandcastle, where each iteration is a fresh `claude --print` / Sandcastle container with no memory of prior iterations beyond what's committed to disk.
+
+- **When shared context helps**: tightly-coupled vertical slices that build on a foundation (e.g. issue #2 ships a `getUserStats` API and issues #3–#7 consume it). The session already knows the conventions slice 1 established, so subsequent slices land faster and with consistent vocabulary.
+- **When shared context hurts**: independent or contradictory issues. A wrong assumption from an early iteration can carry forward implicitly. The Docker runners' clean-slate model avoids that.
+
+#### Compaction is a partial reset, not full memory loss
+
+When the context window fills, Claude Code compacts earlier conversation turns into a summary. Compaction preserves intent + structure (what we're doing, what `prompt.md` says, issue boundaries) and discards conversational noise (file reads, tool output, false starts). Long loops typically survive several compactions without losing alignment to the per-issue boundaries `prompt.md` enforces.
+
+#### Wrong assumptions live in the code, not the context
+
+The real risk isn't a wrong idea surviving in the conversation — it's a wrong API or schema decision shipped in *commits* during early iterations. Compaction can't fix that; subsequent iterations will happily build on the broken foundation because the code is the source of truth.
+
+The actual safety net is `pnpm run test` + `pnpm run typecheck` between every iteration — which `prompt.md` already requires. Don't disable it. Don't let the loop merge work that's red.
+
+#### Auto-accept is what makes it AFK, not the skill
+
+The skill itself doesn't change anything about permission prompts. Without auto-accept (Claude Desktop) or `--dangerously-skip-permissions` (CLI), every `Bash` / `Edit` / `Write` triggers an approval prompt — and you're back to babysitting the loop, which defeats the entire point.
+
+Auto-accept is what makes the workflow truly AFK. The skill is just the iteration mechanic.
+
+#### No trust boundary — fence with hooks if you care about blast radius
+
+Docker runners contain Ralph inside a container. The in-session skill has **no equivalent boundary** — auto-accept means any tool call runs against your real shell, filesystem, and credentials. If the agent gets confused about its working directory, it can write outside the project.
+
+`PreToolUse` hooks in `.claude/settings.json` run even in auto-accept / `--dangerously-skip-permissions` mode and are the simplest practical guardrail. Useful patterns:
+
+- Reject `Edit` / `Write` / `NotebookEdit` whose `file_path` doesn't resolve under the project root.
+- Reject `Bash` matching obvious destructive patterns (`rm -rf /`, `rm -rf ~`, `git push --force` to `main`, etc.).
+- Block `git commit` / `git push` when the current branch is `main` or `master`.
+
+Hooks are pattern-based, not airtight — `Bash` is arbitrary code execution and a determined-bad command can do anything your shell user can. For real containment, use Ralph or Sandcastle. For practical day-to-day accident-prevention, hooks are enough.
+
+#### Outer loop is the user's prompt, not `MAX_ITER`
+
+Ralph/Sandcastle stop after `MAX_ITER` iterations regardless of progress. The in-session skill has no such cap — it loops until the `<promise>NO MORE TASKS</promise>` sentinel fires (no actionable work remains) or you interrupt the session. Keep that in mind when phrasing the kickoff prompt: "work until all issues are done" is a real instruction with no built-in safety stop other than the sentinel.
+
+### When to pick which AFK runtime
+
+| Situation                                                                  | Pick                       |
+| -------------------------------------------------------------------------- | -------------------------- |
+| Long overnight runs (50+ iterations); want fresh context per iteration     | Ralph or Sandcastle        |
+| Strong containment requirement (untrusted repo, shared machine)            | Ralph or Sandcastle        |
+| You want to use Codex instead of Claude                                    | Ralph or Sandcastle        |
+| Quick burst (a handful of related issues); already in a Claude Desktop session | Claude Desktop AFK skill   |
+| Issues that build on each other and benefit from shared vocabulary         | Claude Desktop AFK skill   |
+| No Docker available / don't want to manage container images                | Claude Desktop AFK skill   |
 
 ---
 
@@ -731,6 +829,17 @@ Step 5: Ongoing development
 ./afk/ralph/afk.sh 100 --file plans/prd.md                         # one file
 ./afk/ralph/afk.sh 100 --file plans/plan.md --file plans/prd.md    # multiple files
 ./afk/ralph/afk.sh 100 --issue 1 --file plans/prd.md               # mix issues + files
+
+# === AFK — Claude Desktop (in-session skill, no Docker) ===
+# 1. Open project in Claude Desktop, enable auto-accept (or run
+#    `claude --dangerously-skip-permissions` in the CLI).
+# 2. Send the kickoff prompt:
+/afk work on the remaining issues, don't prompt me, just work until all issues are done
+/afk --issue 1                                                     # one issue
+/afk --issue 1 --issue 2                                           # multiple issues
+/afk --file plans/prd.md                                           # one file
+/afk --issue 1 --file plans/prd.md                                 # mix issues + files
+/loop /afk                                                         # use /loop instead of "keep going" phrasing
 
 # === Utilities ===
 /do-work @plans/plan.md               # end-to-end implementation

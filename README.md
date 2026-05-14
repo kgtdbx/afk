@@ -7,6 +7,7 @@ Two ways to run the Ralph AFK loop. Same interface, different runtimes. An LLM (
 - [Prerequisites](#prerequisites-both-runners)
 - [Setup: Ralph](#setup-ralph-custom-docker)
 - [Setup: Sandcastle](#setup-sandcastle)
+- [Setup: Claude Desktop AFK (in-session skill, no Docker)](#setup-claude-desktop-afk-in-session-skill-no-docker)
 - [Using Codex Instead of Claude Code](#using-codex-instead-of-claude-code)
 - [Where to Run From](#where-to-run-from)
 - [Usage](#usage-identical-for-both-runners)
@@ -130,6 +131,105 @@ Watch logs in another terminal:
 ```bash
 tail -f .sandcastle/logs/<branch-name>.log
 ```
+
+## Setup: Claude Desktop AFK (in-session skill, no Docker)
+
+A third option that runs the AFK loop **inside an existing Claude session** (Claude Desktop or `claude` CLI) instead of spinning up Docker containers per iteration. Lives in `afk/skills/afk/` as a Claude Code skill. No Docker, no auth files, no container builds — just a SKILL.md plus a small `build-prompt.sh` that gathers the same inputs Ralph would gather (last-5 commits + open issue titles + `prompt.md`).
+
+Each `/afk` invocation = ONE iteration. The outer loop is owned either by the user's prompt phrasing ("keep going until all issues are done") or by Claude Code's `/loop` command. The completion sentinel `<promise>NO MORE TASKS</promise>` is preserved from upstream so loops still stop cleanly.
+
+### Step 1: Install the skill into the project
+
+```bash
+# From the target project root, with this afk repo already copied into
+# ./afk/ (same convention as Ralph/Sandcastle setup).
+mkdir -p .claude/skills/afk
+cp afk/skills/afk/SKILL.md       .claude/skills/afk/
+cp afk/skills/afk/build-prompt.sh .claude/skills/afk/
+chmod +x .claude/skills/afk/build-prompt.sh
+```
+
+Or, to make it available across every project, install it user-wide:
+
+```bash
+# Run from inside a checkout of this afk repo
+mkdir -p ~/.claude/skills/afk
+cp skills/afk/SKILL.md       ~/.claude/skills/afk/
+cp skills/afk/build-prompt.sh ~/.claude/skills/afk/
+chmod +x ~/.claude/skills/afk/build-prompt.sh
+```
+
+### Step 2: Verify `prompt.md` is reachable
+
+The skill reads `prompt.md` automatically and resolves it in this order:
+
+1. `$AFK_PROMPT_MD` (if set)
+2. `<repo>/afk/ralph/prompt.md`
+3. `<repo>/ralph/prompt.md`
+
+If you copied the full `afk/` directory into your target project (as the install step assumes), `afk/ralph/prompt.md` is already there — confirm with `ls afk/ralph/prompt.md` and move on. If you installed user-wide and your project doesn't have an `afk/` directory yet, point the skill at any `prompt.md` you have with `export AFK_PROMPT_MD=/path/to/prompt.md`.
+
+### Step 3: Authenticate `gh` and ensure the project builds
+
+Same prerequisites as Ralph: `gh auth login`, `pnpm install` in the project root.
+
+### Step 4: Enable auto-accept so the loop is truly AFK
+
+This is the trick. Without it, every `Bash` / `Edit` / `Write` tool call triggers a permission prompt that you have to approve manually — which defeats the entire AFK premise.
+
+**Claude Desktop:**
+- Toggle **Auto-accept edits** / **auto mode** on in the session's permission menu. Once enabled, the session will execute tool calls without prompting.
+
+**`claude` CLI:**
+- Launch with `--dangerously-skip-permissions`:
+  ```bash
+  claude --dangerously-skip-permissions
+  ```
+- Or toggle bypass-permissions mode via `/permission-mode` inside an existing session.
+
+### Step 5: Kick off the loop
+
+Open the project in Claude Desktop (or the CLI), make sure auto-accept is on, then send a single prompt like:
+
+```
+/afk work on the remaining issues of this project, https://github.com/<owner>/<repo>/issues
+don't prompt me for anything, just work on it until all issues are done
+```
+
+The first line invokes the skill. The free-form instructions after it tell the model to keep iterating across issues, not just do one and stop. The model will:
+
+1. Run `build-prompt.sh` to assemble the iteration prompt (commits + issues + `prompt.md`).
+2. Pick one issue per iteration per `prompt.md`'s priority rules.
+3. Implement, run `pnpm run test` + `pnpm run typecheck`, commit, close the issue.
+4. Append a line to `<repo>/afk/logs/<branch>.log`.
+5. Loop until no actionable work remains, then emit `<promise>NO MORE TASKS</promise>`.
+
+### Equivalent invocations
+
+```text
+# All open issues, loop until done
+/afk work on the remaining issues, don't prompt me, just work until all issues are done
+
+# A single issue
+/afk --issue 12
+
+# A PRD file
+/afk --file plans/gamification-prd.md
+
+# Mix
+/afk --issue 3 --issue 5 --file plans/refactor.md
+```
+
+To use Claude Code's own `/loop` machinery instead of free-form "keep going" phrasing, prefix with `/loop`:
+
+```
+/loop /afk
+/loop /afk --issue 12
+```
+
+`/loop` re-fires `/afk` each turn and stops when the sentinel fires.
+
+For when to pick this workflow vs Ralph/Sandcastle — and the tradeoffs around shared context, compaction, auto-accept, and containment — see [docs/AIHERO-HIGH_LEVEL_WORKFLOWS.md → Claude Desktop AFK Workflow](docs/AIHERO-HIGH_LEVEL_WORKFLOWS.md#workflow-1b-claude-desktop-afk-in-session-no-docker).
 
 ## Using Codex Instead of Claude Code
 
@@ -257,16 +357,21 @@ The scripts use `git remote` and `gh issue list` early on (before resolving path
 afk/
 ├── ralph/                      # Custom Docker container runner
 │   ├── afk.sh                  # Entry point
-│   ├── prompt.md               # Ralph's instructions (read directly via $SCRIPT_DIR)
+│   ├── prompt.md               # Ralph's instructions (read directly via $SCRIPT_DIR;
+│   │                           #   also the canonical source the in-session skill resolves)
 │   └── Dockerfile.ralph        # Container image definition
 │
-└── sandcastle/                 # Sandcastle library runner
-    ├── afk.sh                  # Entry point
-    ├── prompt.md               # Ralph's instructions (copied to ralph/prompt.md at runtime)
-    ├── main.ts                 # Sandcastle config (agent, model, hooks, completion signal)
-    ├── sandcastle-prompt.md    # Prompt template (injects commits, inputs, prompt.md)
-    ├── Dockerfile              # Container image (Node 22, gh CLI, Claude Code)
-    └── .env.example            # Template for tokens (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN, GH_REPO)
+├── sandcastle/                 # Sandcastle library runner
+│   ├── afk.sh                  # Entry point
+│   ├── prompt.md               # Ralph's instructions (copied to ralph/prompt.md at runtime)
+│   ├── main.ts                 # Sandcastle config (agent, model, hooks, completion signal)
+│   ├── sandcastle-prompt.md    # Prompt template (injects commits, inputs, prompt.md)
+│   ├── Dockerfile              # Container image (Node 22, gh CLI, Claude Code)
+│   └── .env.example            # Template for tokens (CLAUDE_CODE_OAUTH_TOKEN, GH_TOKEN, GH_REPO)
+│
+└── skills/afk/                 # Claude Desktop / in-session skill (no Docker)
+    ├── SKILL.md                # Skill definition + per-iteration instructions
+    └── build-prompt.sh         # Assembles commits + issues/files + prompt.md to stdout
 ```
 
 ## How Each Runner Works
@@ -297,16 +402,18 @@ Running them back-to-back or even simultaneously is safe. Ralph ignores `ralph/p
 
 ## Differences
 
-|                 | Ralph                                    | Sandcastle                                             |
-| --------------- | ---------------------------------------- | ------------------------------------------------------ |
-| Runtime         | Custom `docker run`                      | `@ai-hero/sandcastle` library                          |
-| Container image | `ralph-runner` (from `Dockerfile.ralph`) | `sandcastle:*` (from `.sandcastle/Dockerfile`)         |
-| Agents          | Claude Code + Codex (`--agent` flag)     | Claude Code + Codex (`--agent` flag)                   |
-| Auth (Claude)   | `~/.claude_auth.txt`                     | `.sandcastle/.env`                                     |
-| Auth (Codex)    | `~/.codex/auth.json` (mounted into container) | `.sandcastle/.env`                                |
-| Logs            | `ralph/logs/<branch>.log`                | `.sandcastle/logs/<branch>.log`                        |
-| Config          | All in `afk.sh`                          | Split across `main.ts`, `sandcastle-prompt.md`, `.env` |
-| Prompt loading  | Reads own copy directly                  | Copies to `ralph/prompt.md` for Sandcastle to find     |
+|                 | Ralph                                    | Sandcastle                                             | Claude Desktop AFK (skill)                                  |
+| --------------- | ---------------------------------------- | ------------------------------------------------------ | ----------------------------------------------------------- |
+| Runtime         | Custom `docker run`                      | `@ai-hero/sandcastle` library                          | Current Claude session (Desktop or `claude` CLI)            |
+| Container image | `ralph-runner` (from `Dockerfile.ralph`) | `sandcastle:*` (from `.sandcastle/Dockerfile`)         | None — runs in your existing session                        |
+| Agents          | Claude Code + Codex (`--agent` flag)     | Claude Code + Codex (`--agent` flag)                   | Whichever model the session is using (Claude only)          |
+| Auth (Claude)   | `~/.claude_auth.txt`                     | `.sandcastle/.env`                                     | Existing session login — no extra auth file                 |
+| Auth (Codex)    | `~/.codex/auth.json` (mounted into container) | `.sandcastle/.env`                                | N/A                                                          |
+| Logs            | `ralph/logs/<branch>.log`                | `.sandcastle/logs/<branch>.log`                        | `<repo>/afk/logs/<branch>.log` (per the skill)              |
+| Config          | All in `afk.sh`                          | Split across `main.ts`, `sandcastle-prompt.md`, `.env` | `SKILL.md` + `build-prompt.sh`                              |
+| Prompt loading  | Reads own copy directly                  | Copies to `ralph/prompt.md` for Sandcastle to find     | Resolves `$AFK_PROMPT_MD` → `afk/ralph/prompt.md` → `ralph/prompt.md` |
+| Outer loop      | `MAX_ITER` in `afk.sh`                   | `MAX_ITER` in `afk.sh`                                 | User's prompt phrasing or Claude Code's `/loop`             |
+| Isolation       | Docker is the trust boundary             | Docker is the trust boundary                           | Same trust boundary as your shell — needs hooks for fencing |
 
 ## Prompt Contents
 
