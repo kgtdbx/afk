@@ -115,6 +115,10 @@ The main workflow. Human designs, agent builds.
 │  git log                   (see what Ralph committed)        │
 │  npm run dev               (manual QA)                       │
 │  pnpm test                 (verify tests pass)               │
+│                                                              │
+│  Want PR-driven review with an `agent-revise` label that     │
+│  loops the agent back to address comments? See               │
+│  docs/pr-feedback-loop.md for the design.                    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
