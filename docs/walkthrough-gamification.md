@@ -507,3 +507,67 @@ The PR-based scenarios all have a "before merge" escape hatch that costs nothing
 **Scenario A** if you're new to AFK or this is your first PR-driven workflow. Get comfortable with the build-pass-opens-PR + you-review pattern before adding worktrees on top.
 
 Whichever you pick: #8 (HITL QA) is always you, manually, at the end.
+
+## Using this walkthrough as a learning experiment
+
+If you've already shipped the gamification feature once (with any of the three workflows above, or with the no-PR baseline), you can use the same set of issues as a controlled experiment to feel the difference between workflows. Same feature, same dependency graph, same expected output — only the workflow changes.
+
+This is the cleanest way to learn what the workflows actually feel like. Reading this doc isn't the same as running them.
+
+### Pre-flight checklist
+
+Before resetting the repo to the pre-gamification state:
+
+**1. Preserve the current implementation as a baseline.** Don't just reset — tag or branch the current state first so the working version isn't lost:
+
+```bash
+git tag gamification-direct-commits
+# OR if you'd prefer a branch you can check out later:
+git branch gamification-v1
+```
+
+Now you can compare each new workflow run against the original as a reference.
+
+**2. Reopen the closed issues.** AFK won't pick them up otherwise:
+
+```bash
+gh issue reopen 2 3 4 5 6 7 8 --repo <owner>/<repo>
+```
+
+**3. Reset to the right commit.** The commit immediately before the gamification work began (in this repo's history, that was `9b7276b` — find your equivalent):
+
+```bash
+git reset --hard <pre-gamification-sha>
+# If you've pushed the working branch and want the remote to match:
+git push --force-with-lease origin <branch-name>
+```
+
+> **Reset > revert here.** Revert would create N inverse commits, leaving an ugly history of "implemented gamification, then undid it all." Reset rewinds cleanly to a pre-gamification state. The tag preserves what you'd otherwise lose.
+
+### Suggested order
+
+**Run 1: PR feedback loop** (Scenario A above).
+
+Bigger conceptual shift, you'll feel the most difference. The only prerequisite is a small `prompt.md` change to make AFK open PRs instead of merging directly:
+
+```
+[in afk/ralph/prompt.md, replace the "commit + close issue" steps with:]
+
+6. git push -u origin <branch-name>
+7. gh pr create --label pending-review \
+     --title "Fixes #N: ..." \
+     --body "<details>"
+8. gh issue close N --comment "Implemented in PR #M"
+```
+
+~10 lines of prompt change. Then run AFK and observe what the PR-per-slice flow feels like.
+
+**Run 2: Worktree workflow** (Scenario B above) or **combined** (Scenario C above).
+
+After the PR run, reset again and try worktrees — either alone (parallel direct merges) or combined with PRs (parallel PRs). Combined is the "best of both" pattern from this doc.
+
+### Time budget
+
+A single end-to-end run of gamification is ~5–6 hours of agent + supervision in one Claude Desktop session. Re-running for each workflow is ~same. Both workflows ≈ 2x the original.
+
+If you're up for the full experiment: you'll have hands-on experience with all three patterns. If you're pressed for time: do one — the PR loop is the higher-information run because it's the bigger conceptual shift from direct commits.

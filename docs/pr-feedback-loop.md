@@ -722,6 +722,72 @@ There's no industry consensus. The field is fragmented. Roughly:
 
 Most teams are bouncing between these. There's no playbook yet — there's only "what tradeoff are you willing to make this week." The PR feedback loop here is the **most conservative** pattern. It's the right starting point if you're not sure, because it preserves the review safety net you already trust.
 
+## Solo dev considerations
+
+If you're a solo developer, the PR loop's value math is different from team work. Honest case for and against adopting it (and worktrees) when no one else is reviewing your code.
+
+### Should a solo dev adopt the PR loop?
+
+The whole point of PRs solo is to give yourself a *review window* — a moment between "agent done" and "code on main" where you can catch a bad slice. But here's what actually happens to most solo devs who try this:
+
+- The PR opens, you glance at the diff for 10 seconds, you click merge.
+- You skip review when you're tired or in a flow state.
+- After a few weeks the PR step becomes pure ceremony — no actual review happening.
+
+The discipline is genuinely hard to maintain alone because there's no social pressure. If you wouldn't actually read every diff carefully, the PR loop just adds latency without adding safety.
+
+**When it's worth it solo:**
+- You're shipping to real users (the cost of a bad commit is high).
+- You want practice for joining a team workflow later.
+- You want the "GitHub revert button" UX after a bad merge instead of cascade-reverting commits manually.
+
+For sandbox or learning projects: the cost of a bad commit is `git revert` not "production outage." Skip it.
+
+### Does TDD substitute for PR review?
+
+Partially — but TDD catches a different kind of bug than review does. They're complementary, not equivalent.
+
+**What TDD catches well:**
+- **Functional correctness of the thing you tested.** "Completing a lesson awards 10 XP" → if the test passes, the function does what you wrote.
+- **Regressions** in covered code as you add more.
+- **Idempotency, edge cases, boundary conditions** — *if you remembered to write that test*.
+- **API contract violations** between layers — return types, shapes.
+
+For ~60% of bugs in mechanical implementation work, TDD catches them.
+
+**What TDD does NOT catch:**
+- **Wrong specifications.** A test passes when the code matches *your* spec. If your spec was wrong, the test enforces the wrong behavior. TDD is "does the code do what I think it should" — not "is what I think correct?"
+- **Design quality.** No test catches "this function should be in a different layer," "this API will be painful to call," "this is the wrong abstraction."
+- **Performance.** Tests pass on small fixtures regardless of N+1 queries or O(n²) lookups in production-sized data.
+- **Security.** You have to *think* to test for SQL injection, auth bypass, etc. TDD doesn't surface what you didn't think of.
+- **Things you didn't think to test.** This is the big one. Tests verify what you *anticipated*. They're silent on what you didn't.
+- **Code smell / readability.** No test fails because a function is 200 lines.
+
+**The cascade case.** Suppose slice #5's tests all pass and ship a streak counter that works *for the conditions you tested*. Then slice #6 (dashboard) builds on the streak API and #6's tests also pass — because they only test that the dashboard correctly displays whatever the streak API returns. If #5 had a subtle bug in an unmodeled scenario (timezone edge case, leap day, etc.), both #5's and #6's tests stay green and the bug only surfaces in production. PR review *might* catch it with fresh eyes; TDD definitely won't, because the test you didn't write doesn't exist.
+
+**Honest verdict for solo work.** TDD-without-review is genuinely Good Enough when:
+- The spec is well-defined upfront.
+- The implementation is mechanical translation of spec → code.
+- The blast radius of bugs is low (sandbox, learning, internal tool).
+- You're disciplined about edge-case tests, not just happy-path tests.
+
+It breaks down when:
+- The spec itself might be wrong (early product work, novel domain).
+- Architectural decisions are baked in (you can't test your way out of a wrong layer).
+- The cost of a bad ship is high.
+- You need a fresh pair of eyes for security/perf review.
+
+> **Short version: TDD ≈ catching execution bugs. Review ≈ catching judgment bugs.** TDD-only is a reasonable trade for sandbox/learning work; it leaves you exposed for production work.
+
+### What I'd actually do solo
+
+For a solo dev shipping to a sandbox or learning project, stay on the simple workflow: direct commits to a feature branch (no PR, no worktree), AFK does its thing. Two small upgrades worth considering:
+
+1. **Use a fresh branch per PRD** instead of one long-lived branch. Easy to delete a whole branch if a feature went sideways. No worktree, no PR — just `git checkout -b 09-next-feature` before kicking off AFK.
+2. **Try worktrees the first time you have a 4+ slice feature with genuine parallelism.** Until then, don't bother — the per-feature setup tax (worktree creation, `pnpm install` per worktree, merging back, conflict resolution) doesn't pay off below that threshold.
+
+Skip the PR loop entirely until you're actually shipping to users or joining a team that demands it. Documenting it is enough — you have the design; you can build it the day you need it.
+
 ## When this is worth building
 
 - You're already running AFK build passes regularly and the friction is "I have feedback I don't want to type into a follow-up issue."
